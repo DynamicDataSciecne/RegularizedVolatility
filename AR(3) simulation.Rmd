@@ -1,0 +1,208 @@
+---
+title: "AR(3) Simulation and Regularization"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())# Remove objects from enviornment
+library(xtable)
+#### function to obtain optimal alpha
+dd.alpha<-function(Z, alpha, cut.t){
+  MSE_alpha<-rep(0, length(alpha))
+  MAE_alpha<-rep(0, length(alpha))
+  t<-length(Z)
+  for(a in 1:length(alpha)){
+    s<-mean(Z[1:cut.t])
+    error<-rep(0, t)
+    for(i in 1:t){
+      error[i]<-Z[i]-s
+      s<-alpha[a]*Z[i]+(1-alpha[a])*s
+    }
+    MSE_alpha[a]<-mean(error[-(1:cut.t)]^2)
+  }
+  alpha.opt1<-alpha[which.min(MSE_alpha)]
+  return(alpha.opt1)
+}
+```
+
+```{r}
+###### given certain alpha, alpha_e, lambda value, we can caculate rmse, 
+###### mae, forecast value
+dd.reg<-function(Z, alpha, cut.t, lambda, omega){
+  s<-mean(Z[1:cut.t])
+  s.elastic<-sign(s)*max(abs(s)-omega*lambda, 0)/(1+(1-omega)*lambda)
+  t<-length(Z)
+  error<-rep(0, t)
+  for(i in 1:t){
+    error[i]<-Z[i]-s.elastic
+    s<-alpha*Z[i]+(1-alpha)*s
+    s.elastic<-sign(s)*max(abs(s)-omega*lambda, 0)/(1+(1-omega)*lambda)
+  }
+  rmse<-sqrt(mean(error[-(1:cut.t)]^2))
+  mae<-mean(abs(error[-(1:cut.t)]))
+  return(c(rmse, mae, s, s.elastic))
+}
+```
+
+AR(3):
+```{r}
+set.seed(8050)
+df=seq(2, 6, 0.5)
+Z<-list()
+for(i in 1:length(df)){
+ lag.start<-rt(3, df[i])
+ at<-rt(11000, df[i])
+ Zt<-c(lag.start, rep(0, 11000))
+ phi1<-(1/2+1/3+1/4)
+ phi2<--(1/6+1/12+1/8)
+ phi3<-1/24
+ phi<-c(phi1, phi2, phi3)
+ for(j in 4:length(Zt)){
+   Zt[j]<-phi1*Zt[j-1]+phi2*Zt[j-2]+phi3*Zt[j-3]+at[j-3]
+ }
+ Z[[i]]<-Zt[4:length(Zt)]
+ }
+lag.start<-rnorm(3, 0, 1)
+at<-rnorm(11000, 0, 1)
+Zt<-c(lag.start, rep(0, 11000))
+phi1<-(1/2+1/3+1/4)
+phi2<--(1/6+1/12+1/8)
+phi3<-1/24
+phi<-c(phi1, phi2, phi3)
+for(j in 4:length(Zt)){
+  Zt[j]<-phi1*Zt[j-1]+phi2*Zt[j-2]+phi3*Zt[j-3]+at[j-3]
+}
+n<-3000
+Z.use<-tail(Z[[1]], n)
+for(d in 2:length(df)){
+  Z.use<-data.frame(Z.use, tail(Z[[d]], n))
+}
+Z.norm<-Zt[4:length(Zt)]
+Z.use<-data.frame(Z.use, tail(Z.norm, n))
+data.ar<-Z.use
+y<-Z.use
+```
+
+```{r}
+lambda.opt<-rep(0, ncol(Z.use))
+omega.opt<-rep(0, ncol(Z.use))
+rmse.opt<-rep(0, ncol(Z.use))
+mae.opt<-rep(0, ncol(Z.use))
+rmse.usual<-rep(0, ncol(Z.use))
+mae.usual<-rep(0, ncol(Z.use))
+fore.opt<-rep(0, ncol(Z.use))
+fore.opt.elastic<-rep(0, ncol(Z.use))
+omega<-seq(0, 1, 0.1)
+lambda<-seq(0, 1, 0.05)
+Z.names<-c(as.character(df), "norm")
+alpha.opt<-rep(0, ncol(Z.use))
+for(j in 1:ncol(Z.use)){
+  rmse<-matrix(0, nrow=length(omega), ncol=length(lambda))
+  mae<-matrix(0, nrow=length(omega), ncol=length(lambda))
+  fore<-matrix(0, nrow=length(omega), ncol=length(lambda))
+  fore.elastic<-matrix(0, nrow=length(omega), ncol=length(lambda))
+  Z<-Z.use[, j]
+  alpha.opt[j]<-dd.alpha(Z, alpha=seq(0.3, 0.6, 0.01), cut.t=2000)
+  for(a in 1:length(omega)){
+    for(l in 1:length(lambda)){
+      result<-dd.reg(Z, alpha.opt[j], 2000, lambda[l], omega[a])
+      rmse[a, l]<-result[1]
+      fore[a, l]<-result[3]
+      fore.elastic[a, l]<-result[4]
+      mae[a, l]<-result[2]
+    }
+  }
+  index.omega<-which.min(apply(rmse, 1, min))
+  omega.opt[j]<-omega[index.omega]
+  lambda.opt[j]<-lambda[which.min(rmse[index.omega, ])]
+  rmse.opt[j]<-min(rmse)
+  mae.opt[j]<-mae[index.omega, which.min(rmse[index.omega, ])]
+  rmse.usual[j]<-rmse[1, 1]
+  mae.usual[j]<-mae[1, 1]
+  fore.opt[j]<-fore[index.omega, which.min(rmse[index.omega, ])]
+  fore.opt.elastic[j]<-fore.elastic[index.omega, which.min(rmse[index.omega, ])]
+  plot(lambda, rmse[1,], type="b", col="green4", main=Z.names[j], ylab="rmse",
+       xlab=expression(lambda))
+  lines(lambda, rmse[length(omega),], type="b")
+  if(index.omega!=0 & index.omega!=1)
+   lines(lambda, rmse[index.omega,], type="b", col="purple")
+  legend("top",c("ridge", "lasso", paste("elastic net, omega:", omega.opt[j])),
+        lty=c(1,1,1),lwd=c(1, 1, 1),pt.cex=5, col=c("green4", "black", "purple"),
+        cex=0.7)
+}
+rho.cal<-function(y){
+  rho<-cor(y-mean(y), sign(y-mean(y)))
+  return(rho)
+}
+rho<-apply(Z.use, 2, rho.cal)
+rho.e<-mae.usual/rmse.usual
+nu<-rho.e
+for(j in 1:length(rho.e)){
+  if(rho.e[j]<=0.79){
+    fun <- function (x) rho.e[j]*(x-1)*beta(x/2,1/2)-2*sqrt(x-2)
+    nu[j] <- uniroot(fun, c(2, 100))$root
+  }
+  else nu[j]<-NA
+}
+rho.elastic<-mae.opt/rmse.opt
+nu.elastic<-rho.elastic
+for(j in 1:length(rho)){
+  if(rho.elastic[j]<=0.79){
+    fun <- function (x) rho.elastic[j]*(x-1)*beta(x/2,1/2)-2*sqrt(x-2)
+    nu.elastic[j] <- uniroot(fun, c(2, 100))$root
+  }
+  else nu.elastic[j]<-NA
+}
+```
+
+```{r}
+summary.usual<-data.frame(rho, rmse.usual, mae.usual, rho.e, nu)
+summary.elastic<-data.frame(rho, omega.opt, lambda.opt, rmse.opt, mae.opt, 
+                            rho.elastic, nu.elastic)
+rownames(summary.usual)<-c(as.character(df), "norm")
+rownames(summary.elastic)<-c(as.character(df), "norm")
+```
+
+```{r}
+CI.VaR.NP<-matrix(0, ncol=4, nrow=ncol(Z.use))
+for(i in 1:(ncol(Z.use)-1)){
+  CI.VaR.NP[i, ]<-c(fore.opt[i],fore.opt[i]+qt(0.025, df=nu[i])*
+                      sqrt((nu[i]-2)/nu[i])*rmse.usual[i]/sqrt(2000),
+                    fore.opt[i]+qt(0.975, df=nu[i])*
+                      sqrt((nu[i]-2)/nu[i])*rmse.usual[i]/sqrt(2000),
+                    fore.opt[i]+qt(0.01, df=nu[i])*sqrt((nu[i]-2)/nu[i])*rmse.usual[i])
+}
+CI.VaR.NP[ncol(Z.use), ]<-c(fore.opt[length(rho)],fore.opt[length(rho)]+qnorm(0.025, 0, 1)*
+                              rmse.usual[length(rho)]/sqrt(2000),
+                            fore.opt[length(rho)]+qnorm(0.975, 0, 1)*
+                              rmse.usual[i]/sqrt(2000),
+                            fore.opt[length(rho)]+qnorm(0.01, 0, 1)*
+                              rmse.usual[i])
+
+CI.VaR.P<-matrix(0, ncol=4, nrow=ncol(Z.use))
+for(i in 1:(ncol(Z.use)-1)){
+  CI.VaR.P[i, ]<-c(fore.opt.elastic[i],fore.opt.elastic[i]+
+                     qt(0.025, df=nu.elastic[i])*
+                     sqrt((nu.elastic[i]-2)/nu.elastic[i])*rmse.opt[i]/sqrt(2000),
+                 fore.opt.elastic[i]+qt(0.975, df=nu.elastic[i])*
+                   sqrt((nu.elastic[i]-2)/nu.elastic[i])*rmse.opt[i]/sqrt(2000),
+                 fore.opt.elastic[i]+qt(0.01, df=nu.elastic[i])*
+                   sqrt((nu.elastic[i]-2)/nu.elastic[i])*rmse.opt[i])
+}
+CI.VaR.P[ncol(Z.use),]<-c(fore.opt.elastic[length(rho)],
+                           fore.opt.elastic[length(rho)]+qnorm(0.025, 0, 1)*
+                              rmse.opt[length(rho)]/sqrt(2000),
+                            fore.opt.elastic[length(rho)]+qnorm(0.975, 0, 1)*
+                              rmse.opt[i]/sqrt(2000),
+                            fore.opt.elastic[length(rho)]+qnorm(0.01, 0, 1)*
+                              rmse.opt[i])
+rownames(CI.VaR.NP)<-c(as.character(df), "norm")
+colnames(CI.VaR.NP)<-c("forecasting mean","lower", "upper", "percentail forecasting")
+rownames(CI.VaR.P)<-c(as.character(df), "norm")
+colnames(CI.VaR.P)<-c("forecasting mean","lower", "upper", "percentail forecasting")
+```
+

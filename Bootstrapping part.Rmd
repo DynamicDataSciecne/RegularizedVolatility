@@ -1,0 +1,75 @@
+---
+title: "Boot strapping"
+author: "Zimo Zhu"
+date: "2019.1.26"
+output: 
+  pdf_document: 
+    keep_tex: yes
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(fBasics)
+set.seed(3490)
+df<-seq(2.6, 6, 0.1)
+sample.t<-matrix(0, ncol=length(df), nrow=1000)
+for(j in 1:length(df)) sample.t[, j]<-rt(1000, df=df[j])
+s<-apply(sample.t, MARGIN=2, FUN=sd)
+rho.cal<-function(X) return(cor(X-mean(X), sign(X-mean(X))))
+rho.hat<-apply(sample.t, MARGIN=2, FUN = rho.cal)
+sigma.cal<-function(x) return(mean(abs(x-mean(x)))/rho.cal(x))
+sigma.hat<-apply(sample.t, 2, FUN = sigma.cal)
+kuo.hat<-apply(sample.t, MARGIN=2, FUN=kurtosis)+3
+```
+
+Bootstrapping part:
+Formula: 
+$$ As.Var(s) = \dfrac{(k+2)}{4}\dfrac{\sigma^2}{n}$$
+$$As.Var(\hat{\sigma})= \dfrac{1}{I^*_g(\sigma)} = \dfrac{1}{n}\left(\dfrac{
+1-\rho^2}{\rho^2}\right)\sigma^2 $$
+
+
+
+```{r}
+#### Bootstrapping
+boot.cal<-function(n, size, samp){
+  boot.sample<-matrix(0, ncol=n, nrow=size)
+  for(j in 1:n){
+    index<-sample(1:length(samp), size, replace = T)
+    boot.sample[, j]<-samp[index]
+  }
+  rho.bias<-apply(boot.sample, 2, rho.cal)-rho.cal(samp)
+  rho<-rho.cal(samp)-mean(rho.bias)
+  sigma.bias<-mean(apply(boot.sample, 2, sigma.cal))-sigma.cal(samp)
+  sigma<-sigma.cal(samp)-sigma.bias
+  kur.bias<-mean(apply(boot.sample, MARGIN=2, FUN=kurtosis))-kurtosis(samp)
+  kur<-kurtosis(samp)+3-kur.bias
+  var.rho<-var(rho.bias)
+  return(c(sigma, rho, kur, var.rho))
+}
+sigma<-rep(0, length(df))
+rho<-rep(0, length(df))
+kur<-rep(0, length(df))
+var.rho<-rep(0, length(df))
+estimate<-cbind(sigma, rho, kur, var.rho)
+for(i in 1:length(df)){
+  estimate[i, ]<-boot.cal(n=200, size=1000, samp=sample.t[, j])
+}
+var.s<-rep(0, length(df))
+var.sigmahat<-rep(0, length(df))
+var.rho<-estimate[, 4]
+for(i in 1:length(df)){
+  var.s[i]<-(estimate[i, 3]+2)/4 *estimate[i, 1]^2/1000
+  var.sigmahat[i]<-(1-estimate[i, 2]^2)/(estimate[i, 2]^2)*estimate[i, 1]^2/1000
+}
+var<-data.frame(var.s, var.sigmahat)
+colnames(var)<-c("S", expression(sigma))
+rownames(var)<-as.character(df)
+var
+xtable(var, digits=6)
+```
+
